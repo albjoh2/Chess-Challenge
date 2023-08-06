@@ -2,9 +2,15 @@
 using ChessChallenge.API;
 using System.Numerics;
 
-public class MyBot : IChessBot{
+namespace ChessChallenge.Example
+{
+    // A simple bot that can spot mate in one, and always captures the most valuable piece it can.
+    // Plays randomly otherwise.
+    public class BotOne : IChessBot
+{
 
-    struct MoveValue{
+    struct MoveValue
+    {
         public MoveValue(Move m, int v)
         {
             move = m;
@@ -17,17 +23,20 @@ public class MyBot : IChessBot{
     
     /// Piece values: pawn, knight, bishop, rook, queen, king
     int[] pieceValues = { 100, 300, 350, 500, 900, 0};
+
     static Board board;
     Timer timer;
     int NEGATIVE_INFINITY = -99999999;
     int POSITIVE_INFINITY = 99999999;
     int CHECKMATE_EVAL = -9999999;
 
-    static int DistanceFromEdgeOfBoard(int x){
+    static int DistanceFromEdgeOfBoard(int x)
+    {
         return Math.Min(7 - x, x);
     }
 
-    static int DistanceFromEdgeOfBoard(Square square) {
+    static int DistanceFromEdgeOfBoard(Square square) 
+    {
         return DistanceFromEdgeOfBoard(square.File) + DistanceFromEdgeOfBoard(square.Rank);
     }
 
@@ -116,7 +125,8 @@ public class MyBot : IChessBot{
     };
     
     
-    public Move Think(Board pboard, Timer ptimer){
+    public Move Think(Board pboard, Timer ptimer)
+    {
         board = pboard;
         timer = ptimer;
         Move bestMove = Move.NullMove;
@@ -133,7 +143,8 @@ public class MyBot : IChessBot{
         return bestMove;
     }
 
-    MoveValue NegaMax(int depth, int alpha, int beta){
+    MoveValue NegaMax(int depth, int alpha, int beta)
+    {
         Move bestMove = Move.NullMove;
         if (board.IsInCheckmate()) return new MoveValue(bestMove, CHECKMATE_EVAL - depth);
         if (board.IsDraw()) return new MoveValue(bestMove, -50);
@@ -170,7 +181,8 @@ public class MyBot : IChessBot{
         return new MoveValue(bestMove, alpha);
     }
 
-    int EvaluateBoard(){
+    int EvaluateBoard()
+    {
         // sum piece
         int res = 0;
         var pieceLists = board.GetAllPieceLists();
@@ -191,20 +203,19 @@ public class MyBot : IChessBot{
 
         }
         
-        // Mobility evaluation
-        int captureMoves = board.GetLegalMoves(true).Length;
-        int noneCaptureMoves = board.GetLegalMoves(false).Length;
-        res += (captureMoves + noneCaptureMoves /2);
+        
         
         if (!board.IsWhiteToMove) res = -res;
         return res;
     }
 
-    int GetPieceValue(Square sq){
+    int GetPieceValue(Square sq)
+    {
         return pieceValues[(int)board.GetPiece(sq).PieceType - 1];
     }
 
-    void sortMoves(ref Move[] moves){
+    void sortMoves(ref Move[] moves)
+    {
 
         var moveScores = new int[moves.Length];
         for (int i = 0; i < moves.Length; i++)
@@ -224,8 +235,10 @@ public class MyBot : IChessBot{
     }
     
 
-    bool ShouldFinishSearch(){
+    bool ShouldFinishSearch()
+    {
         return timer.MillisecondsElapsedThisTurn > 100;
     }
     
-}
+    
+}}

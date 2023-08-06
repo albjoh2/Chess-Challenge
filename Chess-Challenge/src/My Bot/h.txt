@@ -1,0 +1,515 @@
+My code:
+using System;
+using ChessChallenge.API;
+using System.Numerics;
+
+
+public class MyBot : IChessBot
+{
+
+    struct MoveValue
+    {
+        public MoveValue(Move m, int v)
+        {
+            move = m;
+            value = v;
+        }
+
+        public readonly Move move;
+        public readonly int value;
+    }
+
+    /// Piece values: pawn, knight, bishop, rook, queen, king
+    int[] pieceValues = { 100, 300, 370, 500, 900, 0};
+
+
+    static Board board;
+    Timer timer;
+    int NEGATIVE_INFINITY = -99999999;
+    int POSITIVE_INFINITY = 99999999;
+    int CHECKMATE_EVAL = -9999999;
+
+    int CONNECTED_PAWN_BONUS = 20;
+    int PAWN_CHAIN_BONUS = 30;
+    int ISOLATED_PAWN_PENALTY = -20;
+    int DOUBLED_PAWN_PENALTY = -30;
+
+
+    static int DistanceFromEdgeOfBoard(int x)
+    {
+        return Math.Min(7 - x, x);
+    }
+
+    static int DistanceFromEdgeOfBoard(Square square) 
+    {
+        return DistanceFromEdgeOfBoard(square.File) + DistanceFromEdgeOfBoard(square.Rank);
+    }
+
+    // functions that attempt to simulate a piece square table
+    //           square, return
+    private static Func<Square,  int>[] pieceSquareEstimaters = {
+        (square =>  // PAWN
+        
+            /*
+            0, 0, 0, 0, 0, 0, 0, 0,
+            50, 50, 50, 50, 50, 50, 50, 50,
+            10, 10, 20, 30, 30, 20, 10, 10,
+            5, 5, 10, 25, 25, 10, 5, 5,
+            0, 0, 0, 20, 20, 0, 0, 0,
+            5, -5, -10, 0, 0, -10, -5, 5,
+            5, 10, 10, -20, -20, 10, 10, 5,
+            0, 0, 0, 0, 0, 0, 0, 0
+            */
+            // if we are not on rank 1, subtract 2 from the rank and scale by 10
+            // else if we are on d2 or e2, return -20
+            // else return 10
+            //(square.Rank - 2) * 10
+            square.Rank > 1 ? (square.Rank - 2) * 10 : DistanceFromEdgeOfBoard(square.File) == 3 ? -20 : 10
+        ),
+        (square =>  // KNIGHT
+        
+            /*
+          -50, -40, -30, -30, -30, -30, -40, -50,
+          -40, -20, 0, 5, 5, 0, -20, -40,
+          -30, 5, 10, 15, 15, 10, 5, -30,
+          -30, 0, 15, 20, 20, 15, 0, -30,
+          -30, 5, 15, 20, 20, 15, 5, -30,
+          -30, 0, 10, 15, 15, 10, 0, -30,
+          -40, -20, 0, 0, 0, 0, -20, -40,
+          -50, -40, -30, -30, -30, -30, -40, -50
+          */
+            
+            DistanceFromEdgeOfBoard(square) * 10 - 40
+        ),
+        (square =>  // BISHOP
+        
+            // same as the knight
+            pieceSquareEstimaters[1](square)
+            
+        ),
+        (square =>  // ROOK
+        
+            /*
+          0, 0, 0, 0, 0, 0, 0, 0,
+          5, 10, 10, 10, 10, 10, 10, 5,
+          -5, 0, 0, 0, 0, 0, 0, -5,
+          -5, 0, 0, 0, 0, 0, 0, -5,
+          -5, 0, 0, 0, 0, 0, 0, -5,
+          -5, 0, 0, 0, 0, 0, 0, -5,
+          -5, 0, 0, 0, 0, 0, 0, -5,
+           0, 0, 0, 5, 5, 0, 0, 0
+             */
+            square.Rank == 6 ? 10 : square.File % 7 != 0 ? 0 : square.Rank == 0 ? 0 : -5
+        ),
+        (square =>  // QUEEN
+        
+
+            /*-20, -10, -10, -5, -5, -10, -10, -20,
+            -10, 0, 0, 0, 0, 5, 0, -10,
+            -10, 0, 5, 5, 5, 5, 5, -10,
+            -5, 0, 5, 5, 5, 5, 0, 0,
+            -5, 0, 5, 5, 5, 5, 0, -5,
+            -10, 0, 5, 5, 5, 5, 0, -10,
+            -10, 0, 0, 0, 0, 0, 0, -10,
+            -20, -10, -10, -5,-5, -10, -10, -20*/
+            
+            pieceSquareEstimaters[1](square)
+        ),
+        (square => // KING
+            
+                //int mgStrength = 6-DistanceFromEdgeOfBoard(square);
+                //int egStrength = DistanceFromEdgeOfBoard(square);
+                //int numPieces = BitOperations.PopCount(board.AllPiecesBitboard);
+                //return (mgStrength * numPieces + egStrength * (32 - numPieces)) / 32 * 10;
+                
+                (6-DistanceFromEdgeOfBoard(square)) * BitOperations.PopCount(board.AllPiecesBitboard) + 
+                    DistanceFromEdgeOfBoard(square) * (32-BitOperations.PopCount(board.AllPiecesBitboard)) / 3
+            
+        ),
+        
+    };
+    
+    
+    public Move Think(Board pboard, Timer ptimer)
+    {
+        board = pboard;
+        timer = ptimer;
+        Move bestMove = Move.NullMove;
+        Move bestMoveThisIteration = Move.NullMove;
+        int depth = 0;
+        while (!ShouldFinishSearch())
+        {
+            bestMove = bestMoveThisIteration;
+            depth++;
+
+            bestMoveThisIteration = NegaMax(depth, NEGATIVE_INFINITY, POSITIVE_INFINITY).move;
+        }
+        
+        return bestMove;
+    }
+
+    MoveValue NegaMax(int depth, int alpha, int beta)
+    {
+        Move bestMove = Move.NullMove;
+        if (board.IsInCheckmate()) return new MoveValue(bestMove, CHECKMATE_EVAL - depth);
+        if (board.IsDraw()) return new MoveValue(bestMove, -50);
+
+        if (depth <= 0)
+        {
+            int currentEval = EvaluateBoard();
+            if (currentEval >= beta) return new MoveValue(bestMove, beta);
+            if (currentEval > alpha) alpha = currentEval;
+        }
+
+        
+        
+        var moves = board.GetLegalMoves(depth<=0);
+        sortMoves(ref moves);
+        
+        foreach (Move move in moves)
+        {
+            board.MakeMove(move);
+            int newEval = -NegaMax(depth - 1, -beta, -alpha).value;
+            board.UndoMove(move);
+
+            if (ShouldFinishSearch()) break;
+
+            if (newEval >= beta) return new MoveValue(move, beta);
+
+            if (newEval > alpha)
+            {
+                bestMove = move;
+                alpha = newEval;
+            }
+        }
+
+        return new MoveValue(bestMove, alpha);
+    }
+
+    int EvaluateBoard()
+    {
+        // sum piece
+        int res = 0;
+        var pieceLists = board.GetAllPieceLists();
+        for (int pieceType = 0; pieceType<6; pieceType++)
+        {
+            // PIECE SQUARE VALUE SUMS
+            res += (pieceLists[pieceType].Count - pieceLists[pieceType+6].Count) * pieceValues[pieceType];
+
+            // PIECE SQUARE ESTIMATES
+            ulong friendlyBB = board.GetPieceBitboard((PieceType)pieceType+1, true);
+            ulong enemyBB = board.GetPieceBitboard((PieceType)pieceType+1, false);
+            while (friendlyBB > 0)
+                res += pieceSquareEstimaters[pieceType](
+                       new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref friendlyBB)));
+            while (enemyBB > 0)
+                res -= pieceSquareEstimaters[pieceType](// xor with 56 flips the index of the square to treat it as if it was for the other team
+                    new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref enemyBB)^56));
+
+        }
+
+
+        int pawnStructureScore = 0;
+        
+
+        // Iterate through all pawns on the board
+        foreach (var pawn in pieceLists[(int)PieceType.Pawn])
+        {
+            // Check for connected pawns (horizontally or vertically)
+            int connectedPawns = CountConnectedPawns(pawn.Square);
+            pawnStructureScore += connectedPawns * CONNECTED_PAWN_BONUS;
+
+            // Check for pawn chains
+            int pawnChainLength = CountPawnChainLength(pawn.Square);
+            pawnStructureScore += pawnChainLength * PAWN_CHAIN_BONUS;
+
+            // Check for isolated pawns
+            bool isolated = IsIsolatedPawn(pawn.Square);
+            if (isolated) pawnStructureScore += ISOLATED_PAWN_PENALTY;
+
+            // Check for doubled pawns
+            int doubledPawns = CountDoubledPawns(pawn.Square);
+            pawnStructureScore += doubledPawns * DOUBLED_PAWN_PENALTY;
+        }
+
+        res += pawnStructureScore;
+
+        
+        
+        
+        if (!board.IsWhiteToMove) res = -res;
+        return res;
+    }
+
+
+    int CountConnectedPawns(Square pawnSquare)
+    {
+        // Implement the logic to count connected pawns horizontally or vertically
+        int connectedPawns = 0;
+        bool isWhite = board.GetPiece(pawnSquare).IsWhite == IsWhite.White;
+
+        // Check horizontally to the right
+        for (int file = pawnSquare.File + 1; file <= 7; file++)
+        {
+            Square square = new Square(file, pawnSquare.Rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                connectedPawns++;
+            else
+                break;
+        }
+
+        // Check horizontally to the left
+        for (int file = pawnSquare.File - 1; file >= 0; file--)
+        {
+            Square square = new Square(file, pawnSquare.Rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                connectedPawns++;
+            else
+                break;
+        }
+
+        // Check vertically up
+        for (int rank = pawnSquare.Rank + 1; rank <= 7; rank++)
+        {
+            Square square = new Square(pawnSquare.File, rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                connectedPawns++;
+            else
+                break;
+        }
+
+        // Check vertically down
+        for (int rank = pawnSquare.Rank - 1; rank >= 0; rank--)
+        {
+            Square square = new Square(pawnSquare.File, rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                connectedPawns++;
+            else
+                break;
+        }
+
+        // Return the count of connected pawns
+        return connectedPawns;
+    }
+
+    int CountPawnChainLength(Square pawnSquare)
+    {
+        // Implement the logic to count the length of the pawn chain
+        int pawnChainLength = 1;
+        bool isWhite = board.GetPiece(pawnSquare).IsWhite == IsWhite.White;
+
+        // Check vertically up
+        for (int rank = pawnSquare.Rank + 1; rank <= 7; rank++)
+        {
+            Square square = new Square(pawnSquare.File, rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                pawnChainLength++;
+            else
+                break;
+        }
+
+        // Check vertically down
+        for (int rank = pawnSquare.Rank - 1; rank >= 0; rank--)
+        {
+            Square square = new Square(pawnSquare.File, rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                pawnChainLength++;
+            else
+                break;
+        }
+
+            // Return the length of the pawn chain
+        return pawnChainLength;
+    }
+
+    bool IsIsolatedPawn(Square pawnSquare)
+    {
+        // Implement the logic to check if the pawn is isolated
+        bool isWhite = board.GetPiece(pawnSquare).IsWhite == IsWhite.White;
+
+        // Check adjacent files to the right and left
+        for (int file = pawnSquare.File - 1; file <= pawnSquare.File + 1; file += 2)
+        {
+            if (file >= 0 && file <= 7)
+            {
+                Square adjacentSquare = new Square(file, pawnSquare.Rank);
+                if (board.GetPiece(adjacentSquare) != Piece.None && board.GetPiece(adjacentSquare).PieceType == PieceType.Pawn && board.GetPiece(adjacentSquare).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                    return false;
+            }
+        }
+
+        // Return true if isolated, false otherwise
+        return true;
+    }
+
+    int CountDoubledPawns(Square pawnSquare)
+    {
+        // Implement the logic to count the number of pawns on the same file as the given pawn
+        int doubledPawns = 0;
+        bool isWhite = board.GetPiece(pawnSquare).IsWhite == IsWhite.White;
+
+        // Check vertically up
+        for (int rank = pawnSquare.Rank + 1; rank <= 7; rank++)
+        {
+            Square square = new Square(pawnSquare.File, rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                doubledPawns++;
+        }
+
+        // Check vertically down
+        for (int rank = pawnSquare.Rank - 1; rank >= 0; rank--)
+        {
+            Square square = new Square(pawnSquare.File, rank);
+            if (board.GetPiece(square).PieceType == PieceType.Pawn && board.GetPiece(square).IsWhite == board.GetPiece(pawnSquare).IsWhite)
+                doubledPawns++;
+        }
+
+        // Return the count of doubled pawns
+        return doubledPawns;
+    }
+
+    int GetPieceValue(Square sq)
+    {
+        return pieceValues[(int)board.GetPiece(sq).PieceType - 1];
+    }
+
+    void sortMoves(ref Move[] moves)
+    {
+
+        var moveScores = new int[moves.Length];
+        for (int i = 0; i < moves.Length; i++)
+        {
+            Move move = moves[i];
+            if (move.IsCapture)
+            {
+                moveScores[i] += GetPieceValue(move.TargetSquare) - GetPieceValue(move.StartSquare) / 10;
+
+            }
+            
+            // negate so that the moves get sorted best to worst
+            moveScores[i] *= -1;
+        }
+        
+        Array.Sort(moveScores, moves);
+    }
+    
+
+    bool ShouldFinishSearch()
+    {
+        return timer.MillisecondsElapsedThisTurn > 100;
+    }
+}
+Errors:
+Albin@MacBook-Air Chess-Challenge % dotnet run
+/MyBot.cs(248,62): error CS0103: The name 'IsWhite' does not exist in the current context 
+/MyBot.cs(298,62): error CS0103: The name 'IsWhite' does not exist in the current context 
+/MyBot.cs(327,62): error CS0103: The name 'IsWhite' does not exist in the current context 
+/MyBot.cs(335,61): error CS0117: 'Piece' does not contain a definition for 'None' 
+/MyBot.cs(348,62): error CS0103: The name 'IsWhite' does not exist in the current context 
+
+The build failed. Fix the build errors and run again.
+
+Here is the documentation for the chesschallengeAPI, how do i solve the errors:
+MyBot (class)
+Type	Definition	Notes
+Move	Think(Board board, Timer timer)	This is the function you need to implement for this challenge.
+Board (class)
+Type	Definition	Notes
+void	MakeMove(Move move)	Updates the board state with the given move. The move is assumed to be legal, and may result in errors if it is not. Note that this doesn't make the move in the actual game, it just allows you to look ahead at future possibilities. So, making a move will toggle the IsWhiteToMove property, and calling GetLegalMoves() will now return the other player's moves. The move can be undone with the UndoMove() method.
+void	UndoMove(Move move)	Undo a move that was made with the MakeMove method. Moves must be undone in reverse order, so for example, if moves A, B, C are made, they must be undone in the order C, B, A
+bool	TrySkipTurn()	Try skip the current turn. This will fail and return false if the player is currently in check. Note that skipping a turn is not allowed during an actual game, but can be used as a search technique.
+void	UndoSkipTurn()	Undo a turn that was succesfully skipped with TrySkipTurn()
+Move[]	GetLegalMoves(bool capturesOnly)	Gets an array of the legal moves in the current position. Can choose to get only capture moves with the optional 'capturesOnly' parameter.
+void	GetLegalMovesNonAlloc(ref Span<Move> moveList, bool capturesOnly)	(New in V1.13). Fills the given move span with legal moves, and slices it to the correct length. This gives the same result as the GetLegalMoves function, but allows you to be more efficient with memory by allocating moves on the stack rather than the heap. Can choose to get only capture moves with the optional 'capturesOnly' parameter.
+Example usage:
+System.Span<Move> moves = stackalloc Move[256];
+board.GetLegalMovesNonAlloc(ref moves);
+bool	IsInCheck()	
+bool	IsInCheckmate()	
+bool	IsDraw()	Test if the current position is a draw due stalemate, repetition, insufficient material, or 50-move rule.
+bool	HasKingsideCastleRight(bool white)	Does the given player still have the right to castle kingside? Note that having the right to castle doesn't necessarily mean castling is legal right now (for example, a piece might be in the way, or player might be in check, etc).
+bool	HasQueensideCastleRight(bool white)	Does the given player still have the right to castle queenside? Note that having the right to castle doesn't necessarily mean castling is legal right now (for example, a piece might be in the way, or player might be in check, etc).
+bool	SquareIsAttackedByOpponent(Square square)	Is the given square attacked by the opponent? (opponent being whichever player doesn't currently have the right to move).
+Square	GetKingSquare(bool white)	Gets the square that the king (of the given colour) is currently on.
+Piece	GetPiece(Square square)	Gets the piece on the given square. If the square is empty, the piece will have a PieceType of None.
+PieceList	GetPieceList(PieceType type, bool white)	Gets a list of pieces of the given type and colour
+PieceList[]	GetAllPieceLists()	Gets an array of all the piece lists. In order these are: Pawns(white), Knights (white), Bishops (white), Rooks (white), Queens (white), King (white), Pawns (black), Knights (black), Bishops (black), Rooks (black), Queens (black), King (black).
+string	GetFenString()	FEN representation of the current position.
+ulong	GetPieceBitboard(PieceType type, bool white)	64-bit number where each bit set to 1 represents a square that contains a piece of the given type/colour.
+ulong	WhitePiecesBitboard	64-bit number where each bit set to 1 represents a square that contains a white piece.
+ulong	BlackPiecesBitboard	64-bit number where each bit set to 1 represents a square that contains a black piece.
+ulong	AllPiecesBitboard	64-bit number where each bit set to 1 represents a square that contains a piece.
+bool	IsWhiteToMove	Is it white's turn to move in the current position? Note that called MakeMove() and UndoMove() will toggle this value.
+int	PlyCount	Number of ply (a single move by either white or black) played so far.
+ulong	ZobristKey	64-bit hash of the current position.
+Board	Board.CreateBoardFromFEN(string fen)	Creates a board from the given fen string. Please note that this is quite slow, and so it is advised to use the board given in the Think function, and update it using MakeMove and UndoMove instead.
+Move (struct)
+Type	Definition	Notes
+Move	new Move(string name, Board board)	Constructor for creating a move from its name (in UCI format). For example, to move from the square b1 to c3, the move string would be "b1c3". If the move is a pawn promotion, the promotion type must be added to the end: 'q' = queen, 'r' = rook, 'n' = knight, 'b' = bishop. So an example move would be "e7e8q". You'll typically want to get legal moves from the board, rather than creating them yourself.
+Square	StartSquare	The square that this move is moving the piece from.
+Square	TargetSquare	The square that this move is moving the piece to.
+PieceType	MovePieceType	The type of piece that is being moved.
+PieceType	CapturePieceType	If this is a capture move, the type of piece that is being captured.
+PieceType	PromotionPieceType	If this is a pawn promotion, the type of piece that the pawn is being promoted to.
+bool	IsCapture	
+bool	IsEnPassant	
+bool	IsPromotion	
+bool	IsCastles	
+bool	IsNull	
+bool	Equals(Move otherMove)	Tests if two moves are the same. This is true if they move to/from the same square, and move/capture/promote the same piece type.
+Move	Move.NullMove	Represents a null/invalid move, which can be used as a placeholder until a valid move has been found.
+Square (struct)
+Type	Definition	Notes
+Square	new Square(string name)	Constructor for creating a square from its algebraic name (e.g. "e4")
+int	File	Value from 0 to 7 representing files 'a' to 'h'
+int	Rank	Value from 0 to 7 representing ranks '1' to '8'
+int	Index	Value from 0 to 63. The values map to the board like so:
+0 – 7 : a1 – h1
+8 – 15 : a2 – h2
+...
+
+56 – 63 : a8 – h8
+string	Name	The algebraic name of the square, e.g. "e4"
+Piece (struct)
+Type	Definition	Notes
+Piece	new Piece(PieceType type, bool isWhite, Square square)	Constructor for creating a new piece. You'll typically want to get pieces from the board, rather than constructing them yourself.
+bool	IsWhite	
+PieceType	PieceType	
+Square	Square	The square that the piece is on. Note: this value will not be updated if the piece is moved (it is a snapshot of the state of the piece when it was looked up).
+bool	IsPawn	
+bool	IsKnight	
+bool	IsBishop	
+bool	IsRook	
+bool	IsQueen	
+bool	IsKing	
+bool	IsNull	This will be true if the piece was retrieved from an empty square on the board
+PieceType (enum)
+None = 0, Pawn = 1, Knight = 2, Bishop = 3, Rook = 4, Queen = 5, King = 6
+PieceList (class)
+Type	Definition	Notes
+int	Count	The number of pieces in the list
+bool	IsWhitePieceList	True if the pieces in this list are white, false if they are black
+PieceType	TypeOfPieceInList	The type of piece stored in this list (a PieceList always contains only one type and colour of piece)
+Piece	GetPiece(int index)	Get the i-th piece in the list.
+Timer (class)
+Type	Definition	Notes
+int	MillisecondsRemaining	Amount of time left on clock for current player (in milliseconds)
+int	MillisecondsElapsedThisTurn	Amount of time elapsed since current player started thinking (in milliseconds)
+BitboardHelper (static class)
+Type	Definition	Notes
+A bitboard is a 64 bit integer (ulong), in which each bit that is set to 1 represents something about the state of the corresponding square on the board (such as whether a particular type of piece is there, etc.) The 64 bits map to the squares like so:
+Bit 0 (LSB) to bit 7 : 'a1' to 'h1'.
+Bit 8 to bit 15 : 'a2' to 'h2'
+...
+Bit 56 to bit 63 : 'a8' to 'h8'.
+void	SetSquare(ref ulong bitboard, Square square)	Set the given square on the bitboard to 1.
+void	ClearSquare(ref ulong bitboard, Square square)	Clear the given square on the bitboard to 0.
+void	ToggleSquare(ref ulong bitboard, Square square)	Toggle the given square on the bitboard between 0 and 1.
+bool	SquareIsSet(ulong bitboard, Square square)	Returns true if the given square is set to 1 on the bitboard, otherwise false.
+int	ClearAndGetIndexOfLSB(ref ulong bitboard)	Returns index of the first bit that is set to 1. The bit will also be cleared to zero. This can be useful for iterating over all the set squares in a bitboard
+int	GetNumberOfSetBits(ulong bitboard)	Returns the number of bits that set to 1 in the given bitboard.
+ulong	GetSliderAttacks(PieceType type, Square square, Board board)	Gets a bitboard where each bit that is set to 1 represents a square that the given sliding piece type is able to attack. These attacks are calculated from the given square, and take the given board state into account (so attacks will be blocked by pieces that are in the way). Valid only for sliding piece types (queen, rook, and bishop).
+ulong	GetSliderAttacks(PieceType type, Square square, ulong blockers)	Gets a bitboard where each bit that is set to 1 represents a square that the given sliding piece type is able to attack. These attacks are calculated from the given square, and take the given blocker bitboard into account (so attacks will be blocked by pieces that are in the way). Valid only for sliding piece types (queen, rook, and bishop).
+ulong	GetKnightAttacks(Square square)	Gets a bitboard of squares that a knight can attack from the given square.
+ulong	GetKingAttacks(Square square)	Gets a bitboard of squares that a king can attack from the given square.
+ulong	GetPawnAttacks(Square square, bool isWhite)	Gets a bitboard of squares that a pawn (of the given colour) can attack from the given square.

@@ -2,7 +2,10 @@
 using ChessChallenge.API;
 using System.Numerics;
 
-public class MyBot : IChessBot{
+namespace ChessChallenge.Example{
+    // A simple bot that can spot mate in one, and always captures the most valuable piece it can.
+    // Plays randomly otherwise.
+    public class BotTwo : IChessBot{
 
     struct MoveValue{
         public MoveValue(Move m, int v)
@@ -194,7 +197,7 @@ public class MyBot : IChessBot{
         // Mobility evaluation
         int captureMoves = board.GetLegalMoves(true).Length;
         int noneCaptureMoves = board.GetLegalMoves(false).Length;
-        res += (captureMoves + noneCaptureMoves /2);
+        res += ((captureMoves * 2) + noneCaptureMoves / 2);
         
         if (!board.IsWhiteToMove) res = -res;
         return res;
@@ -228,4 +231,5 @@ public class MyBot : IChessBot{
         return timer.MillisecondsElapsedThisTurn > 100;
     }
     
-}
+    
+}}

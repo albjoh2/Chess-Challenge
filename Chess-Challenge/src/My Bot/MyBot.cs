@@ -136,7 +136,7 @@ public class MyBot : IChessBot{
     MoveValue NegaMax(int depth, int alpha, int beta){
         Move bestMove = Move.NullMove;
         if (board.IsInCheckmate()) return new MoveValue(bestMove, CHECKMATE_EVAL - depth);
-        if (board.IsDraw()) return new MoveValue(bestMove, -50);
+        if (board.IsDraw()) return new MoveValue(bestMove, -10);
 
         if (depth <= 0)
         {
@@ -190,12 +190,8 @@ public class MyBot : IChessBot{
                     new Square(BitboardHelper.ClearAndGetIndexOfLSB(ref enemyBB)^56));
 
         }
-        
-        // Mobility evaluation
-        int captureMoves = board.GetLegalMoves(true).Length;
-        int noneCaptureMoves = board.GetLegalMoves(false).Length;
-        res += (captureMoves + noneCaptureMoves /2);
-        
+         
+
         if (!board.IsWhiteToMove) res = -res;
         return res;
     }
